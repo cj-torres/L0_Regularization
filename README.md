@@ -14,7 +14,7 @@ This method allows for the generic adaptation of any PyTorch module, though it m
 An important divergence from Louizos that allows it to be generalized is that each parameter is optimized separately. In other words, it optimizes for connection, not neural, dropout. It also suffers from an inability to do large batches while also sampling each dropout independently. Nevertheless, the code has proven useful for analyzing the computational complexity of different data given an architecture.
 
 I plan to revisit this code in the future and implement some or all of the following:
-* A method to exclude optimizing parameters from regularization
+* A method to exclude parameters from regularization
 * A method allowing batch processing with independent sampling
 * Support for initializing parameters with different distributions
 
