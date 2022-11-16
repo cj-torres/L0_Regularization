@@ -30,4 +30,4 @@ After initialization use your new module in the following way:
 * `.count_l0` will return the expected value of the number of retained parameters during a forward pass
 * `.count_l2` will return the expected cost of encoding the parameters (sum of squares of expected values AFTER masking)
 
-The last two are useful for measurements, but "regularization" is the backprop supporting function.
+The last two are useful for measurements, but `.regularization()` is the backprop supporting function.
