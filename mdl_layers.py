@@ -184,17 +184,17 @@ class RegLSTM(torch.nn.Module):
                                   1, self.hidden_size,
                                   dtype=seq.dtype, device=seq.device)
             hx = (h_zeros, c_zeros)
-            if is_batched:
-                if (hx[0].dim() != 3 or hx[1].dim() != 3):
-                    msg = ("For batched 3-D input, hx and cx should "
-                           f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
-                    raise RuntimeError(msg)
-            else:
-                if hx[0].dim() != 2 or hx[1].dim() != 2:
-                    msg = ("For unbatched 2-D input, hx and cx should "
-                           f"also be 2-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
-                    raise RuntimeError(msg)
-                hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
+            # if is_batched:
+            #     if (hx[0].dim() != 3 or hx[1].dim() != 3):
+            #         msg = ("For batched 3-D input, hx and cx should "
+            #                f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+            #         raise RuntimeError(msg)
+            # else:
+            #     if hx[0].dim() != 2 or hx[1].dim() != 2:
+            #         msg = ("For unbatched 2-D input, hx and cx should "
+            #                f"also be 2-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+            #         raise RuntimeError(msg)
+            #     hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
 
             # Each batch of the hidden state should match the input sequence that
             # the user believes he/she is passing in.
@@ -204,8 +204,6 @@ class RegLSTM(torch.nn.Module):
         outputs = []
         hiddens = []
         for x, weights in zip(seq, samples):
-            print(weights)
-            print(x)
             if x.is_cuda:
                 weights = torch._cudnn_rnn_flatten_weight(
                     weights, 4,
@@ -217,12 +215,12 @@ class RegLSTM(torch.nn.Module):
             outputs.append(result[0])
             hiddens.append(result[1:])
         output = torch.cat(outputs, dim=batch_dim)
-        hidden = (torch.cat([h[0] for h in hiddens], dim=batch_dim),
-                  torch.cat([h[1] for h in hiddens], dim=batch_dim))
+        hidden = (torch.stack([h[0].squeeze(1) for h in hiddens], dim=batch_dim),
+                  torch.stack([h[1].squeeze(1) for h in hiddens], dim=batch_dim))
 
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if not is_batched:
             output = output.squeeze(batch_dim)
-            hidden = (hidden[0].squeeze(batch_dim), hiddens[1].squeeze(batch_dim))
+            hidden = (hidden[0], hidden[1])
 
         return output, hidden
