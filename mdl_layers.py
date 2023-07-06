@@ -7,46 +7,48 @@ except ImportError:
     _cudnn = None
 
 
-def variable_embedding(x: torch.LongTensor, embeds: torch.Tensor):
-    num_embeds = embeds.size()[-2]
-    embed_dim = embeds.size()[-1]
-    max_x = torch.max(x).item()
-    min_x = torch.min(x).item()
-    assert(max_x < num_embeds and min_x >= 0)
-    x = einops.rearrange(x, '... -> ... ()')
-    x = einops.repeat(x, '... -> ... embeds', embeds=embed_dim)
-    return torch.gather(embeds, -2, x).squeeze()
-
-
-def ve_unit_test():
-    def iter_tensor_loop(x: torch.Tensor):
-        if x.dim() == 1:
-            return [((i,), x_i) for i, x_i in enumerate(x)]
-        else:
-            return [((j,)+ i, x_i) for j, x_j in enumerate(x) for i, x_i in iter_tensor_loop(x_j)]
-
-    def slow_embedding(x: torch.LongTensor, embeds: torch.Tensor):
-        batches = x.size()
-        emb_size = (embeds.size()[-1],)
-        final_tensor = torch.empty(batches+emb_size)
-        for final_tensor_indx, embedding_indx in iter_tensor_loop(x):
-            final_tensor[final_tensor_indx] = embeds[final_tensor_indx][embedding_indx]
-        return final_tensor
-
-    # dim = 1
-    y = torch.LongTensor(torch.randint(10, (1000,)))
-    embeds = torch.randn(1000, 10, 50)
-    assert(torch.equal(variable_embedding(y, embeds), slow_embedding(y, embeds)))
-
-    # dim = 2
-    y = torch.LongTensor(torch.randint(10, (1000, 200)))
-    embeds = torch.randn(1000, 200, 10, 50)
-    assert(torch.equal(variable_embedding(y, embeds), slow_embedding(y, embeds)))
-
-    # dim = 3
-    y = torch.LongTensor(torch.randint(10, (1000, 200, 30)))
-    embeds = torch.randn(1000, 200, 30, 10, 50)
-    assert(torch.equal(variable_embedding(y, embeds), slow_embedding(y, embeds)))
+# def variable_embedding(x: torch.LongTensor, embeds: torch.Tensor):
+#     num_embeds = embeds.size()[-2]
+#     embed_dim = embeds.size()[-1]
+#     max_x = torch.max(x).item()
+#     min_x = torch.min(x).item()
+#     assert(max_x < num_embeds and min_x >= 0)
+#     x = einops.rearrange(x, '... -> ... ()')
+#     x = einops.repeat(x, '... -> ... embeds', embeds=embed_dim)
+#     return torch.gather(embeds, -2, x).squeeze()
+#
+#
+#
+#
+# def ve_unit_test():
+#     def iter_tensor_loop(x: torch.Tensor):
+#         if x.dim() == 1:
+#             return [((i,), x_i) for i, x_i in enumerate(x)]
+#         else:
+#             return [((j,)+ i, x_i) for j, x_j in enumerate(x) for i, x_i in iter_tensor_loop(x_j)]
+#
+#     def slow_embedding(x: torch.LongTensor, embeds: torch.Tensor):
+#         batches = x.size()
+#         emb_size = (embeds.size()[-1],)
+#         final_tensor = torch.empty(batches+emb_size)
+#         for final_tensor_indx, embedding_indx in iter_tensor_loop(x):
+#             final_tensor[final_tensor_indx] = embeds[final_tensor_indx][embedding_indx]
+#         return final_tensor
+#
+#     # dim = 1
+#     y = torch.LongTensor(torch.randint(10, (1000,)))
+#     embeds = torch.randn(1000, 10, 50)
+#     assert(torch.equal(variable_embedding(y, embeds), slow_embedding(y, embeds)))
+#
+#     # dim = 2
+#     y = torch.LongTensor(torch.randint(10, (1000, 200)))
+#     embeds = torch.randn(1000, 200, 10, 50)
+#     assert(torch.equal(variable_embedding(y, embeds), slow_embedding(y, embeds)))
+#
+#     # dim = 3
+#     y = torch.LongTensor(torch.randint(10, (1000, 200, 30)))
+#     embeds = torch.randn(1000, 200, 30, 10, 50)
+#     assert(torch.equal(variable_embedding(y, embeds), slow_embedding(y, embeds)))
 
 
 class RegularizedParam(torch.nn.Module):
@@ -55,7 +57,7 @@ class RegularizedParam(torch.nn.Module):
                  temperature: float = 2 / 3, droprate_init=0.2, limit_a=-.1, limit_b=1.1, epsilon=1e-6
                  ):
         super(RegularizedParam, self).__init__()
-        self.param = copy.deepcopy(original_parameter)
+        self.param = torch.nn.Parameter(copy.deepcopy(original_parameter))
         self.mask = torch.nn.Parameter(torch.Tensor(self.param.size()))
 
         self.is_bias = is_bias
@@ -130,7 +132,7 @@ class RegularizedParam(torch.nn.Module):
         eps = torch.rand(size) * (1 - 2 * self.epsilon) + self.epsilon
         return eps
 
-    def sample_z(self, size: torch.Size(), sample=True):
+    def sample_z(self, size: tuple, sample=True):
         """Sample the hard-concrete gates for training and use a deterministic value for testing"""
         size = size + self.mask.size()
         if sample:
@@ -142,7 +144,13 @@ class RegularizedParam(torch.nn.Module):
             pi = torch.sigmoid(self.mask)
             return torch.nn.functional.hardtanh(pi * (self.limit_b - self.limit_a) + self.limit_a, min_val=0, max_val=1)
 
-    def sample_weights(self, size: torch.Size, sample=True):
+    def sample_weights(self, size: tuple, sample=True):
+        '''
+        :param size: Tuple, usually indicating size of batches as in (batches,) but allowing for dummy dimensions as in
+        (batches,1,1)
+        :param sample: Whether to sample weights (training) or return final trained state (dev)
+        :return: Torch.tensor of sampled weights
+        '''
         mask = self.sample_z(size, sample)
         return mask * self.param
 
@@ -305,36 +313,18 @@ class RegEmbedding(torch.nn.Module):
     def count_l2(self):
         return self.weigt.count_l2()
 
-    def forward(self, x: torch.LongTensor, batch_ends: int = None):
+    def forward(self, x: torch.LongTensor):
         '''
-        :param x: input of LongTensor which will be mapped to embeddings
-        :param batch_ends: final batch dimension, typical behavior will be zero, assumption is batch-first input
+        :param x: input of LongTensor which will be mapped to embeddings, first dimension is assumed to be batched
         :return: Tensor of Size(x) x embedding_dimension
         '''
-        if batch_ends:
-            assert(isinstance(batch_ends, int)), "sample_beginning must be of type int"
-            assert (0 <= batch_ends <= len(x.size())), \
-                "sample_beginning must be >= 0 and <= dimension of input tensor"
-            if self.training:
-                sampled_dims = x.size()[:batch_ends+1]
-                num_non_batch_dimensions = len(x.size()[batch_ends+1:])
-                unsampled_dims = torch.Size([1 for _ in range(num_non_batch_dimensions)])
-                new_size = sampled_dims + unsampled_dims
-                embedding_samples = self.weight.sample_weights(x.size()[:batch_ends+1], self.training)
-                embedding_samples.expand(new_size + torch.Size(embedding_samples)[-2:])
-                end_size = x.size() + embedding_samples.size()[len(x.size()):]
-                embedding_samples = embedding_samples.expand(end_size)
-                return variable_embedding(x, embedding_samples)
-            else:
-                embedding = self.weight.sample_weights(torch.Size((1,)), self.training).squeeze(dim=0)
-                return torch.nn.functional.embedding(x, embedding)
+        if self.training:
+            embedding_samples = self.weight.sample_weights(x.size()[0], self.training)
+            embeddings = [torch.nn.functional.embedding(x_i, emb_i) for x_i, emb_i in zip(x, embedding_samples)]
+            return torch.stack(embeddings, dim=0)
         else:
-            if self.training:
-                embedding_samples = self.weight.sample_weights(x.size(), self.training)
-                return variable_embedding(x, embedding_samples)
-            else:
-                embedding = self.weight.sample_weights(torch.Size((1,)), self.training).squeeze(dim=0)
-                return torch.nn.functional.embedding(x, embedding)
+            embedding = self.weight.sample_weights(1, self.training).squeeze(dim=0)
+            return torch.nn.functional.embedding(x, embedding)
 
 
 class RegLinear(torch.nn.Module):
@@ -368,10 +358,14 @@ class RegLinear(torch.nn.Module):
 
     def forward(self, x: torch.LongTensor):
         if self.training:
-            weight_samples = self.weight.sample_weights(x.size()[:-1], self.training)
-            bias_samples = self.bias.sample_weights(x.size()[:-1], self.training)
+            batches = x.size()[0]
+            irrelevant_dimensions = len(x.size()[1:-1])
+            sample_size = (batches,) + tuple([1 for _ in range(irrelevant_dimensions)])
+
+            weight_samples = self.weight.sample_weights(sample_size, self.training)
+            bias_samples = self.bias.sample_weights(sample_size, self.training)
             return torch.einsum('...ji,...j->...i', weight_samples, x) + bias_samples
         else:
-            weight = self.weight.sample_weights(torch.Size((1,)), self.training).squeeze(dim=0)
-            bias = self.bias.sample_weights(torch.Size((1,)), self.training).squeeze(dim=0)
+            weight = self.weight.sample_weights((1,), self.training).squeeze(dim=0)
+            bias = self.bias.sample_weights((1,), self.training).squeeze(dim=0)
             return torch.nn.functional.linear(x, weight, bias)
