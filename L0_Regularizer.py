@@ -29,7 +29,6 @@ class L0_Regularizer(torch.nn.Module):
         # below code guts the module of its previous parameters,
         # allowing them to be replaced by non-leaf tensors
 
-        self.reset_parameters()
         self.to("cpu")
 
         for name in self.param_names:
@@ -48,8 +47,10 @@ class L0_Regularizer(torch.nn.Module):
         for name, weight in self.pre_parameters.items():
             if "bias" in name:
                 torch.nn.init.constant_(weight, 0.0)
+            elif self.param.data.ndimension() >= 2:
+                torch.nn.init.xavier_uniform_(self.param)
             else:
-                torch.nn.init.xavier_uniform_(weight)
+                torch.nn.init.uniform_(self.param, 0, 1)
 
         for name, weight in self.mask_parameters.items():
             torch.nn.init.normal_(weight, math.log(1 - self.droprate_init) - math.log(self.droprate_init), 1e-2)

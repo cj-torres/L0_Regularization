@@ -247,7 +247,7 @@ class RegLSTM(torch.nn.Module):
                                   dtype=seq.dtype, device=seq.device)
             hx = (h_zeros, c_zeros)
 
-        if self.training:
+        if self.training and not block_sample:
             outputs = []
             hiddens = []
             samples = zip(*[w.sample_weights(torch.Size([batch_sz]), self.training) for w in self._weights])
@@ -266,7 +266,7 @@ class RegLSTM(torch.nn.Module):
             hidden = (torch.stack([h[0].squeeze(1) for h in hiddens], dim=batch_dim),
                       torch.stack([h[1].squeeze(1) for h in hiddens], dim=batch_dim))
         else:
-            samples = (w.sample_weights(torch.Size([batch_sz]), self.training) for w in self._weights)
+            samples = (w.sample_weights((1,), self.training) for w in self._weights)
             result = torch._VF.lstm(seq, hx, tuple(samples), True, self.num_layers,
                                     0, self.training, self.bidirectional, True)
             output = result[0]
@@ -365,7 +365,7 @@ class RegRNN(torch.nn.Module):
             hx = h_zeros
 
         if self.mode == "tanh":
-            if self.training:
+            if self.training and not block_sample:
                 outputs = []
                 hiddens = []
                 samples = zip(*[w.sample_weights(torch.Size([batch_sz]), self.training) for w in self._weights])
@@ -390,7 +390,7 @@ class RegRNN(torch.nn.Module):
                 output = result[0]
                 hidden = result[1:]
         elif self.mode == "relu":
-            if self.training:
+            if self.training and not block_sample:
                 outputs = []
                 hiddens = []
                 samples = zip(*[w.sample_weights(torch.Size([batch_sz]), self.training) for w in self._weights])
@@ -456,12 +456,12 @@ class RegEmbedding(torch.nn.Module):
     def count_l2(self):
         return self.weight.count_l2()
 
-    def forward(self, x: torch.LongTensor):
+    def forward(self, x: torch.LongTensor, block_sample=False):
         '''
         :param x: input of LongTensor which will be mapped to embeddings, first dimension is assumed to be batched
         :return: Tensor of Size(x) x embedding_dimension
         '''
-        if self.training:
+        if self.training and not block_sample:
             embedding_samples = self.weight.sample_weights((x.size(0),), self.training)
             embeddings = [torch.nn.functional.embedding(x_i, emb_i) for x_i, emb_i in zip(x, embedding_samples)]
             return torch.stack(embeddings, dim=0)
@@ -503,8 +503,8 @@ class RegLinear(torch.nn.Module):
     def count_l2(self):
         return self.weight.count_l2() + self.bias.count_l2()
 
-    def forward(self, x: torch.LongTensor):
-        if self.training:
+    def forward(self, x: torch.LongTensor, block_sample=False):
+        if self.training and not block_sample:
             batches = x.size()[0]
             irrelevant_dimensions = len(x.size()[1:-1])
             sample_size = (batches,) + tuple([1 for _ in range(irrelevant_dimensions)])
@@ -515,8 +515,7 @@ class RegLinear(torch.nn.Module):
         else:
             weight = self.weight.sample_weights((1,), self.training).squeeze(dim=0)
             bias = self.bias.sample_weights((1,), self.training).squeeze(dim=0)
-            return torch.nn.functional.linear(x, weight, bias)
-
+            return torch.nn.functional.linear(x, weight.T, bias)
 
 
 """ MODEL TESTS """
